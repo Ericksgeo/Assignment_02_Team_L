@@ -5,7 +5,7 @@ from tkinter import *
 
 
 # creating UI to input coordinates
-# Source: Tkinter tutorial
+# Source: Tkinter tutorial https://www.tutorialsteacher.com/python/create-ui-using-tkinter-in-python
 
 class MyWindow:
 
