@@ -1,0 +1,99 @@
+import shapely.geometry as sg
+import json
+import requests
+from tkinter import *
+
+
+# creating UI to input coordinates
+# Source: Tkinter tutorial
+
+class MyWindow:
+
+    def __init__(self, win):
+        # creating labels and positions
+        self.lbl1 = Label(win, text='EAST:')
+        self.lbl2 = Label(win, text='NORTH:')
+        self.lbl3 = Label(win, text='Status:')
+        self.lbl4 = Label(win, text='')
+        self.t1 = Entry(bd=3)
+        self.t2 = Entry(bd=3)
+        # creating buttons to calculate and reset input
+        self.btn1 = Button(win, text='plot')
+        self.btn2 = Button(win, text='clear')
+        self.lbl1.place(x=100, y=50)
+        self.t1.place(x=200, y=50)
+        self.lbl2.place(x=100, y=100)
+        self.t2.place(x=200, y=100)
+        self.b1 = Button(win, text='calculate', command=self.calculate)
+        self.b2 = Button(win, text='reset')
+        self.b2.bind('<Button-1>', self.reset)
+        self.b1.place(x=100, y=150)
+        self.b2.place(x=200, y=150)
+        self.lbl3.place(x=100, y=200)
+        self.lbl4.place(x=150, y=200)
+
+    def calculate(self):
+        # creating "calculate" method to return E and N
+        es = self.t1.get()
+        nt = self.t2.get()
+        if es != "" and nt != "":
+            while True:
+                try:
+                    x = float(es)
+                    y = float(nt)
+                except ValueError:
+                    # Postcode detector sample: PO30 1QB
+                    # SOURCE: https: // api.postcodes.io /
+                    self.lbl4.configure(text='Characters in the Input, Checking if Postcode match..')
+                    postcode = str(es + nt).replace(" ", "")
+                    resp = requests.get('https://api.postcodes.io/postcodes/' +
+                                        str(postcode))
+                    if resp.status_code != 404:
+                        self.lbl4.configure(text='It is a postcode')
+                        json_data = json.loads(resp.text)
+                        qq = json_data["result"]["eastings"]
+                        ww = json_data["result"]["northings"]
+                        long = json_data["result"]["longitude"]
+                        lat = json_data["result"]["latitude"]
+                        self.lbl4.configure(text=str("postcode: \n  E: " + str(qq) +
+                                                     "\n  N: " + str(ww) + "\n  Lat: " + str(lat) +
+                                                     "\n  Long: " + str(long)))
+                        self.e = float(qq)
+                        self.n = float(ww)
+                        break
+                    else:
+                        self.lbl4.configure(text="No postcode match, try again.")
+                        return
+                else:
+                    # check if coords are in range
+                    if (425000 < x < 470000) and (75000 < y < 100000):
+                        self.lbl4.configure(text="Initialising, please wait...")
+                        self.e = x
+                        self.n = y
+                        break
+                    else:
+                        self.lbl4.configure(text="Error: Please Enter Coordinates in range\n (425000,75000)-(470000,"
+                                                 "100000)\n or a postcode on Isle of Wight")
+                        return
+        elif es == "" or nt == "":
+            self.lbl4.configure(text="Incomplete Coordinates,\n try again...(Press Reset to clear)")
+            return
+        coords1 = sg.Point(self.e, self.n)
+        window.destroy()
+        return coords1
+
+    def reset(self):
+        # creating "reset" method to clear input
+        self.t1.delete(0, 'end')
+        self.t2.delete(0, 'end')
+        self.lbl4.configure(text="")
+
+
+window = Tk()
+input_coords = MyWindow(window)
+# creating window using the MYWindow class
+window.title('FLOOD EMERGENCY PLANNING')
+window.geometry("400x300+10+10")
+window.mainloop()
+
+# coords1 = shapely object
