@@ -2,6 +2,10 @@ import shapely.geometry as sg
 import json
 import requests
 from tkinter import *
+import networkx as nx
+import json
+import numpy as np
+import matplotlib.pyplot as plt
 
 
 # creating UI to input coordinates
@@ -78,11 +82,10 @@ class MyWindow:
         elif es == "" or nt == "":
             self.lbl4.configure(text="Incomplete Coordinates,\n try again...(Press Reset to clear)")
             return
-        coords1 = sg.Point(self.e, self.n)
         window.destroy()
-        return coords1
+        return
 
-    def reset(self):
+    def reset(self, event):
         # creating "reset" method to clear input
         self.t1.delete(0, 'end')
         self.t2.delete(0, 'end')
@@ -96,4 +99,5 @@ window.title('FLOOD EMERGENCY PLANNING')
 window.geometry("400x300+10+10")
 window.mainloop()
 
-# coords1 = shapely object
+coords1 = sg.Point(input_coords.e, input_coords.n)
+

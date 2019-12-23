@@ -1,0 +1,23 @@
+
+import networkx as nx
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+solent_itn_json = "C:/Users/esanc/PycharmProjects/asign_02/material/itn/solent_itn.json"
+with open(solent_itn_json, "r") as f:
+    solent_itn=json.load(f)
+
+graph1 = nx.Graph()
+
+roadlinks = solent_itn['roadlinks']
+for link in roadlinks:
+    graph1.add_edge(roadlinks[link]['start'],
+                    roadlinks[link]['end'],
+                    fid=link,
+                    weight=roadlinks[link]['length'])
+
+nx.draw(graph1)
+plt.show(block=True)
+plt.interactive(False)
