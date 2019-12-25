@@ -1,0 +1,42 @@
+from shapely.geometry import Point, Polygon
+import shapefile
+
+
+class ReadIslandFromShp:
+    def __init__(self, shpfilepath):
+        self.__filepath = shpfilepath
+
+    def get_island_polygon(self):
+        # Read shape file
+        sf = shapefile.Reader(self.__filepath)
+        feature = sf.shapeRecords()[0]
+        first = feature.__geo_interface__
+        points = first["geometry"]["coordinates"][3][0]
+        # create island vector polygon
+        island = Polygon(points)
+        return island
+
+
+class PointCheck:
+    def __init__(self, polygon, point):
+        self.__polygon = polygon
+        self.__point = point
+
+    def test_point(self):
+        # test whether input point is on the island
+        if self.__point.touches(self.__polygon) or self.__point.within(self.__polygon):
+            status = "Available Location."
+        else:
+            status = "Error."
+        return status
+
+
+def main():
+    island = ReadIslandFromShp("Material/shape/isle_of_wight.shp").get_island_polygon()
+    user_point = Point(input_coords.e, input_coords.n)
+    status = PointCheck(island, user_point).test_point()
+    print(status)
+
+
+if __name__ == "__main__":
+    main()
