@@ -1,11 +1,13 @@
 import shapely.geometry as sg
-import json
 import requests
 from tkinter import *
+from tkinter import messagebox
 import networkx as nx
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+from shapely.geometry import Point, Polygon
+import shapefile
 
 
 # creating UI to input coordinates
@@ -15,8 +17,9 @@ class MyWindow:
 
     def __init__(self, win):
         # creating labels and positions
-        self.lbl1 = Label(win, text='EAST:')
-        self.lbl2 = Label(win, text='NORTH:')
+        self.lbl0 = Label(win, text='Please insert coordinates (OSGB36) or postal code from the Isle of Wight:')
+        self.lbl1 = Label(win, text='EAST or first part of postcode (PO30):')
+        self.lbl2 = Label(win, text='NORTH or last part of postcode (1QB):')
         self.lbl3 = Label(win, text='Status:')
         self.lbl4 = Label(win, text='')
         self.t1 = Entry(bd=3)
@@ -24,10 +27,11 @@ class MyWindow:
         # creating buttons to calculate and reset input
         self.btn1 = Button(win, text='plot')
         self.btn2 = Button(win, text='clear')
-        self.lbl1.place(x=100, y=50)
-        self.t1.place(x=200, y=50)
-        self.lbl2.place(x=100, y=100)
-        self.t2.place(x=200, y=100)
+        self.lbl0.place(x=10, y=10)
+        self.lbl1.place(x=10, y=50)
+        self.t1.place(x=220, y=50)
+        self.lbl2.place(x=10, y=100)
+        self.t2.place(x=220, y=100)
         self.b1 = Button(win, text='calculate', command=self.calculate)
         self.b2 = Button(win, text='reset')
         self.b2.bind('<Button-1>', self.reset)
@@ -77,7 +81,7 @@ class MyWindow:
                         break
                     else:
                         self.lbl4.configure(text="Error: Please Enter Coordinates in range\n (425000,75000)-(470000,"
-                                                 "100000)\n or a postcode on Isle of Wight")
+                                                 "100000)\n or a postcode of the Isle of Wight")
                         return
         elif es == "" or nt == "":
             self.lbl4.configure(text="Incomplete Coordinates,\n try again...(Press Reset to clear)")
@@ -91,6 +95,35 @@ class MyWindow:
         self.t2.delete(0, 'end')
         self.lbl4.configure(text="")
 
+class ReadIslandFromShp:
+    def __init__(self, shpfilepath):
+        self.__filepath = shpfilepath
+
+    def get_island_polygon(self):
+        # Read shape file
+        sf = shapefile.Reader(self.__filepath)
+        feature = sf.shapeRecords()[0]
+        first = feature.__geo_interface__
+        points = first["geometry"]["coordinates"][3][0]
+        # create island vector polygon
+        island = Polygon(points)
+        return island
+
+
+class PointCheck:
+    def __init__(self, polygon, point):
+        self.__polygon = polygon
+        self.__point = point
+
+    def test_point(self):
+        # test whether input point is on the island
+        if self.__point.touches(self.__polygon) or self.__point.within(self.__polygon):
+            status = "Available Location."
+        else:
+            status = "Error, point outside island boundaries."
+            messagebox.showinfo("The inserted point is outside Isle of Wight Boundaries, try again...")
+        return status
+
 
 window = Tk()
 input_coords = MyWindow(window)
@@ -100,4 +133,9 @@ window.geometry("400x300+10+10")
 window.mainloop()
 
 coords1 = sg.Point(input_coords.e, input_coords.n)
+
+island = ReadIslandFromShp("Material/shape/isle_of_wight.shp").get_island_polygon()
+status = PointCheck(island, coords1).test_point()
+print(status)
+
 
