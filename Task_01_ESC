@@ -121,7 +121,7 @@ class PointCheck:
             status = "Available Location."
         else:
             status = "Error, point outside island boundaries."
-            messagebox.showinfo("The inserted point is outside Isle of Wight Boundaries, try again...")
+            messagebox.showinfo("ERROR","The inserted point is outside Isle of Wight Boundaries, try again...")
         return status
 
 
