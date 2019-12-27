@@ -15,13 +15,19 @@ class ReadRoadsFromShp:
             points.append(tuple(shapes[i].points[0]))
         return points
 
+    def get_point_attribute(self):
+        nodes = shapefile.Reader(self.__filepath)
+        attribute = nodes.records()
+        return attribute
+
+
 class NearestITN:
     def __init__(self, user_point, safe_point, road_point):
         self.__user_point = user_point
         self.__safe_point = safe_point
         self.__road_point = road_point
 
-    def Rtree(self):
+    def Rtree(self, attribute):
         idx = index.Index()
         for n, point in enumerate(self.__road_point):
             idx.insert(n, point, str(n))
@@ -32,14 +38,20 @@ class NearestITN:
         for k in idx.nearest(self.__safe_point):
             index2 = k
 
-        return index1, index2
+        user_point_name = attribute[index1][0]
+        safe_point_name = attribute[index2][0]
+
+        return user_point_name, safe_point_name
 
 def main():
     highest_point = (448800, 93730)
     user_point = (450000, 85000)
     road_point = ReadRoadsFromShp(r'Material\roads\nodes.shp').get_nodes()
-    index1, index2 = NearestITN(user_point, highest_point, road_point).Rtree()
-    print(index1, index2)
+    attribute = ReadRoadsFromShp(r'Material\roads\nodes.shp').get_point_attribute()
+
+    user_point_name, safe_point_name = NearestITN(user_point, highest_point, road_point).Rtree(attribute)
+    print(user_point_name, safe_point_name)
+
 
 if __name__ == "__main__":
     main()
