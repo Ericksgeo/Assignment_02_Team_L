@@ -103,6 +103,12 @@ class MyWindow:
         self.lbl4.configure(text="")
         winsound.Beep(440, 100)
 
+    def on_closing(self):
+        if messagebox.askokcancel("Quit", "Do you want to quit?"):
+            self.root.destroy()
+            print("Terminated by user.")
+            exit()
+
 
 class ReadIslandFromShp:
     def __init__(self, shpfilepath):
@@ -318,6 +324,7 @@ def main():
     window = MyWindow()
     window.root.title('FLOOD EMERGENCY PLANNING')
     window.root.geometry("450x300+500+200")
+    window.root.protocol("WM_DELETE_WINDOW", window.on_closing)
     window.root.mainloop()
 
     # test whether input point is in the island boundaries
