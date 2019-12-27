@@ -1,45 +1,44 @@
 if __name__ == "__main__":
-
-    import shapely.geometry as sg
     import requests
-    from tkinter import *
+    import tkinter as tk
     from tkinter import messagebox
-    import winsound
-    import networkx as nx
     import json
-    import numpy as np
-    import matplotlib.pyplot as plt
+    import winsound
+    import rasterio.mask
     from shapely.geometry import Point, Polygon
     import shapefile
+    import numpy as np
     import rasterio
-    import rasterio.mask
 
+    # creating UI to input coordinates
+    # Source: Tkinter tutorial https://www.tutorialsteacher.com/python/create-ui-using-tkinter-in-python
 
     class MyWindow:
-        # creating UI to input coordinates
-        # Source: Tkinter tutorial https://www.tutorialsteacher.com/python/create-ui-using-tkinter-in-python
-        def __init__(self, win):
+
+        def __init__(self):
             # creating labels and positions
-            self.lbl0 = Label(win, text='Please insert coordinates (OSGB36) or postal code from the Isle of Wight:')
-            self.lbl1 = Label(win, text='EAST or first part of postcode (PO30):')
-            self.lbl2 = Label(win, text='NORTH or last part of postcode (1QB):')
-            self.lbl3 = Label(win, text='Status:')
-            self.lbl4 = Label(win, text='')
-            self.t1 = Entry(bd=3)
-            self.t2 = Entry(bd=3)
+            self.root = tk.Tk()
+            self.lbl0 = tk.Label(self.root,
+                                 text='Please insert coordinates (OSGB36) or postal code from the Isle of Wight:')
+            self.lbl1 = tk.Label(self.root, text='EAST or first part of postcode (PO30):')
+            self.lbl2 = tk.Label(self.root, text='NORTH or last part of postcode (1QB):')
+            self.lbl3 = tk.Label(self.root, text='Status:')
+            self.lbl4 = tk.Label(self.root, text='')
+            self.t1 = tk.Entry(bd=3)
+            self.t2 = tk.Entry(bd=3)
             # creating buttons to calculate and reset input
-            self.btn1 = Button(win, text='plot')
-            self.btn2 = Button(win, text='clear')
+            self.btn1 = tk.Button(self.root, text='plot')
+            self.btn2 = tk.Button(self.root, text='clear')
             self.lbl0.place(x=10, y=10)
             self.lbl1.place(x=10, y=50)
-            self.t1.place(x=220, y=50)
+            self.t1.place(x=250, y=50)
             self.lbl2.place(x=10, y=100)
-            self.t2.place(x=220, y=100)
-            self.b1 = Button(win, text='calculate', command=self.calculate)
-            self.b2 = Button(win, text='reset')
+            self.t2.place(x=250, y=100)
+            self.b1 = tk.Button(self.root, text='calculate', command=self.calculate)
+            self.b2 = tk.Button(self.root, text='reset')
             self.b2.bind('<Button-1>', self.reset)
             self.b1.place(x=100, y=150)
-            self.b2.place(x=200, y=150)
+            self.b2.place(x=250, y=150)
             self.lbl3.place(x=100, y=200)
             self.lbl4.place(x=150, y=200)
             self.e = ""
@@ -85,14 +84,13 @@ if __name__ == "__main__":
                             self.n = y
                             break
                         else:
-                            self.lbl4.configure(text="Error: Please Enter Coordinates in range\n E425 000,"
-                                                     "N75 000-E470 000, "
-                                                     "N100 000\n or a postcode of the Isle of Wight")
+                            self.lbl4.configure(text="Error: Please Enter Coordinates in range\n (425000,75000)-("
+                                                     "470000, 100000)\n or a postcode of the Isle of Wight")
                             return
             elif es == "" or nt == "":
                 self.lbl4.configure(text="Incomplete Coordinates,\n try again...(Press Reset to clear)")
                 return
-            window.destroy()
+            self.root.destroy()
             return
 
         def reset(self, event):
@@ -101,6 +99,7 @@ if __name__ == "__main__":
             self.t2.delete(0, 'end')
             self.lbl4.configure(text="")
             winsound.Beep(440, 100)
+            return event
 
 
     class ReadIslandFromShp:
@@ -126,11 +125,15 @@ if __name__ == "__main__":
         def test_point(self):
             # test whether input point is on the island
             if self.__point.touches(self.__polygon) or self.__point.within(self.__polygon):
-                status = "Available Location."
+                status = "Available Location. Calculating..."
+                print(status)
             else:
                 status = "Error, point outside island boundaries."
-                Tk().withdraw()
-                messagebox.showerror("ERROR", "The inserted point is outside Isle of Wight Boundaries, try again...")
+                tk.Tk().withdraw()
+                messagebox.showerror("ERROR",
+                                     "The inserted point is outside Isle of Wight Boundaries, please restart the "
+                                     "program...")
+                exit()
             return status
 
 
@@ -163,8 +166,10 @@ if __name__ == "__main__":
             return int(line4[1])
 
         def get_elevation(self):
+            # init elevation data array
             self.__eledata = np.zeros((self.get_nrows(), self.get_ncols()))
             row = 0
+            # read elevation data
             for line in self.__lines[5:]:
                 eachline = line.strip().split(" ")
                 for col in range(0, self.get_ncols()):
@@ -174,17 +179,20 @@ if __name__ == "__main__":
 
         def get_max_point(self, area):
             features = [area.__geo_interface__]
+            # use shp to clip the rasterio
+            # Source: https://www.cnblogs.com/shoufengwei/p/6437934.html
             with rasterio.open(self.__filepath) as scr:
                 out_image, out_transform = rasterio.mask.mask(scr, features, crop=False)
                 area_ele = out_image.reshape(out_image.shape[1], out_image.shape[2])
             a = np.where(area_ele == np.max(area_ele))
-            shortest=10000
+            shortest = 10000
+            # get the nearest point in Euclidean distance as the only highest point
             for m in range(0, len(a[0])):
                 xr = a[0][m]
                 yr = a[1][m]
                 xo = self.get_cellsize() * yr + self.get_cellsize() / 2 + self.get_xllcorner()
                 yo = self.get_nrows() * self.get_cellsize() - (
-                            self.get_cellsize() * xr + self.get_cellsize() / 2) + self.get_yllcorner()
+                        self.get_cellsize() * xr + self.get_cellsize() / 2) + self.get_yllcorner()
                 xu = self.__point.x
                 yu = self.__point.y
                 distance = np.sqrt((xu - xo) ** 2 + (yu - yo) ** 2)
@@ -193,22 +201,23 @@ if __name__ == "__main__":
                     hpoint = Point(xo, yo)
             return hpoint
 
+
     def main():
-        coords1 = sg.Point(input_coords.e, input_coords.n)
+        # creating window using the MyWindow class
+        window = MyWindow()
+        window.root.title('FLOOD EMERGENCY PLANNING')
+        window.root.geometry("450x300+100+100")
+        window.root.mainloop()
 
+        # test whether input point is in the island boundaries
+        user_point = Point(window.e, window.n)
         island = ReadIslandFromShp("Material/shape/isle_of_wight.shp").get_island_polygon()
-        status = PointCheck(island, coords1).test_point()
-        if status == "Error, point outside island boundaries.":
-            exit()
-        print(status)
-        shparea = coords1.buffer(5000).intersection(island)
-        highest_point = Elevation("Material/elevation/SZ.asc", coords1).get_max_point(shparea)
-        print(highest_point)
+        PointCheck(island, user_point).test_point()
 
-    window = Tk()
-    input_coords = MyWindow(window)
-    # creating window using the MYWindow class
-    window.title('FLOOD EMERGENCY PLANNING')
-    window.geometry("400x300+10+10")
-    window.mainloop()
+        # use island shp to clip the buffer and get the highest point of available area
+        shparea = user_point.buffer(5000).intersection(island)
+        highest_point = Elevation("Material/elevation/SZ.asc", user_point).get_max_point(shparea)
+        print("The highest point within 5km is:", highest_point)
+
+
     main()
