@@ -4,12 +4,14 @@ from tkinter import messagebox
 import json
 import winsound
 import rasterio.mask
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, LineString
 import shapefile
 import numpy as np
+import pandas as pd
 import rasterio
 from rtree import index
 import networkx as nx
+import geopandas as gpd
 
 
 # creating UI to input coordinates
@@ -125,22 +127,25 @@ class ReadIslandFromShp:
         return island
 
 
-class ReadNodesFromShp:
-    def __init__(self, roadsfilepath):
-        self.__filepath = roadsfilepath
+class ReadElevation:
+    def __init__(self, rasterfilepath):
+        self.__filepath = rasterfilepath
 
-    def get_nodes(self):
-        nodes = shapefile.Reader(self.__filepath)
-        shapes = nodes.shapes()
-        points = []
-        for i in range(len(shapes)):
-            points.append(tuple(shapes[i].points[0]))
-        return points
+    def get_elevation_data(self):
+        elevation = rasterio.open(self.__filepath)
+        return elevation
 
-    def get_point_attribute(self):
-        nodes = shapefile.Reader(self.__filepath)
-        attribute = nodes.records()
-        return attribute
+
+class ReadITN:
+    def __init__(self, itnfilepath):
+        self.__filepath = itnfilepath
+
+    def get_itn(self):
+        with open(self.__filepath, "r") as f:
+            solent_itn = json.load(f)
+        roads_table = pd.DataFrame(solent_itn['roadlinks'])
+        nodes_table = pd.DataFrame(solent_itn['roadnodes'])
+        return roads_table, nodes_table
 
 
 class PointCheck:
@@ -162,161 +167,128 @@ class PointCheck:
         return status
 
 
-class Elevation:
+class ClipElevation:
 
-    def __init__(self, elefilepath):
+    def __init__(self, elefilepath, user_point, island):
         self.__filepath = elefilepath
-        with open(self.__filepath, "r") as elefile:
-            self.__lines = elefile.readlines()
-        # init elevation data array
+        self.__user_point = user_point
+        self.__island = island
 
-    def get_ncols(self):
-        line0 = self.__lines[0].strip().split(" ")
-        return int(line0[1])
-
-    def get_nrows(self):
-        line1 = self.__lines[1].strip().split(" ")
-        return int(line1[1])
-
-    def get_xllcorner(self):
-        line2 = self.__lines[2].strip().split(" ")
-        return int(line2[1])
-
-    def get_yllcorner(self):
-        line3 = self.__lines[3].strip().split(" ")
-        return int(line3[1])
-
-    def get_cellsize(self):
-        line4 = self.__lines[4].strip().split(" ")
-        return int(line4[1])
-
-    def elevation_data_info(self):
-        return self.get_ncols(), self.get_nrows(), self.get_xllcorner(), self.get_yllcorner(), self.get_cellsize()
-
-    def get_elevation(self):
-        self.__eledata = np.zeros((self.get_nrows(), self.get_ncols()))
-        row = 0
-        # read elevation data
-        for line in self.__lines[5:]:
-            eachline = line.strip().split(" ")
-            for col in range(0, self.get_ncols()):
-                self.__eledata[row, col] = float(eachline[col])
-            row = row + 1
-        return self.__eledata
-
-    def get_max_point(self, area, point):
-        self.__point = point
-        features = [area.__geo_interface__]
+    def get_area_ele(self):
+        safe_area = self.__user_point.buffer(5000).intersection(self.__island)
+        user_features = [safe_area.__geo_interface__]
         # use shp to clip the rasterio
         # Source: https://www.cnblogs.com/shoufengwei/p/6437934.html
         with rasterio.open(self.__filepath) as scr:
-            out_image, out_transform = rasterio.mask.mask(scr, features, crop=False)
+            out_image, out_transform = rasterio.mask.mask(scr, user_features, crop=False)
             area_ele = out_image.reshape(out_image.shape[1], out_image.shape[2])
-        a = np.where(area_ele == np.max(area_ele))
-        shortest = 10000
-        # get the nearest point in Euclidean distance as the only highest point
-        for m in range(0, len(a[0])):
-            xr = a[0][m]
-            yr = a[1][m]
-            xo = self.get_cellsize() * yr + self.get_cellsize() / 2 + self.get_xllcorner()
-            yo = self.get_nrows() * self.get_cellsize() - (
-                    self.get_cellsize() * xr + self.get_cellsize() / 2) + self.get_yllcorner()
-            xu = self.__point.x
-            yu = self.__point.y
-            distance = np.sqrt((xu - xo) ** 2 + (yu - yo) ** 2)
-            if distance < shortest:
-                shortest = distance
-                hpoint = Point(xo, yo)
-        return hpoint
+        return area_ele
+
+
+class HighestPoint:
+
+    def __init__(self, elevation, area_ele):
+        self.__elevation = elevation
+        self.__area_ele = area_ele
+
+    def get_highest_point(self, user_point):
+        highest_index = np.where(self.__area_ele == np.max(self.__area_ele))
+        row_user, col_user = self.__elevation.index(user_point.x, user_point.y)
+
+        # choose the nearest highest point
+        nearest_highest_point_index = (0, 0)
+        nearest_highest_point = (0, 0)
+        distance_max = 10000
+        if len(highest_index[0]) > 1:
+            for i in range(len(highest_index[0])):
+                distance = (abs(highest_index[0][i] - row_user) ** 2 + abs(highest_index[1][i] - col_user) ** 2) ** 0.5
+                if distance < distance_max:
+                    distance_max = distance
+                    nearest_highest_point_index = (highest_index[0][i], highest_index[1][i])
+                    nearest_highest_point = Point(self.__elevation.xy(highest_index[0][i], highest_index[1][i]))
+        return nearest_highest_point_index, nearest_highest_point
 
 
 class NearestITN:
-    def __init__(self, user_point, safe_point, road_point):
+    def __init__(self, user_point, nearest_highest_point, nodes_table):
         self.__user_point = (user_point.x, user_point.y)
-        self.__safe_point = (safe_point.x, safe_point.y)
-        self.__road_point = road_point
+        self.__nearest_highest_point = (nearest_highest_point.x, nearest_highest_point.y)
+        self.__nodes_table = nodes_table
 
-    def Rtree(self, attribute):
+    def get_nearest_itn(self):
         idx = index.Index()
         index1 = 0
         index2 = 0
-        for n, point in enumerate(self.__road_point):
-            idx.insert(n, point, str(n))
+        point_list = []
+        nodes_name_list = self.__nodes_table.columns.tolist()
+        for node in self.__nodes_table.loc['coords']:
+            point_list.append(tuple(node))
 
+        # use Rtree to find nearest point
+        for n, point in enumerate(point_list):
+            idx.insert(n, point, str(n))
         for j in idx.nearest(self.__user_point):
             index1 = j
-
-        for k in idx.nearest(self.__safe_point):
+        for k in idx.nearest(self.__nearest_highest_point):
             index2 = k
-
-        user_point_name = attribute[index1][0]
-        safe_point_name = attribute[index2][0]
-
-        return user_point_name, safe_point_name
+        start_point_name = nodes_name_list[index1]
+        end_point_name = nodes_name_list[index2]
+        return start_point_name, end_point_name
 
 
 class ShortestPath:
 
-    def __init__(self, itn_filepath, ele_array, ele_info):
-        self.__filepath = itn_filepath
-        self.__ele_array = ele_array
-        self.__ele_ncols = ele_info[0]
-        self.__ele_nrows = ele_info[1]
-        self.__ele_xllcorner = ele_info[2]
-        self.__ele_yllcorner = ele_info[3]
-        self.__ele_cell = ele_info[4]
+    def __init__(self, elevation, roads_table, nodes_table):
+        self.__elevation = elevation
+        self.__elematrix = self.__elevation.read(1)
+        self.__roads_table = roads_table
+        self.__nodes_table = nodes_table
 
-    def get_path(self, start, end):
-        self.__start = start
-        self.__end = end
-        # create the graph from the dictionary loaded from the JSON file
-        solent_itn_json = self.__filepath
-        with open(solent_itn_json, "r") as f:
-            solent_itn = json.load(f)
+    def get_path(self, start_point_name, end_point_name):
+
         g = nx.DiGraph()
-        road_links = solent_itn['roadlinks']
-        road_nodes = solent_itn['roadnodes']
-
-        for link in road_links:
-            point_a_id = road_links[link]['start']
-            point_b_id = road_links[link]['end']
+        for column_name, row in self.__roads_table.iteritems():
             # get coordinates of start point and end point of each road
-            for node in road_nodes:
-                if node == point_a_id:
-                    point_a_x = road_nodes[node]['coords'][0]
-                    point_a_y = road_nodes[node]['coords'][1]
-                elif node == point_b_id:
-                    point_b_x = road_nodes[node]['coords'][0]
-                    point_b_y = road_nodes[node]['coords'][1]
+            point_start_x = row[1][0][0]
+            point_start_y = row[1][0][1]
+            point_end_x = row[1][-1][0]
+            point_end_y = row[1][-1][1]
 
-            # get the start point raster and end point raster
-            point_a_r = (self.__ele_nrows - (point_a_y - self.__ele_yllcorner) // self.__ele_cell - 1,
-                         (point_a_x - self.__ele_xllcorner) // self.__ele_cell)
-            point_b_r = (self.__ele_nrows - (point_b_y - self.__ele_yllcorner) // self.__ele_cell - 1,
-                         (point_b_x - self.__ele_xllcorner) // self.__ele_cell)
-
-            # get the elevation of start point and end point
-            point_a_ele = self.__ele_array[int(point_a_r[0]), int(point_a_r[1])]
-            point_b_ele = self.__ele_array[int(point_b_r[0]), int(point_b_r[1])]
+            # get elevation data of start point and end point of each road
+            row_start, col_start = self.__elevation.index(point_start_x, point_start_y)
+            row_end, col_end = self.__elevation.index(point_end_x, point_end_y)
+            ele_start = self.__elematrix[row_start, col_start]
+            ele_end = self.__elematrix[row_end, col_end]
 
             # Naismith's rule
-            distance = road_links[link]['length']
-            time1 = distance / 5000 * 60
-            height = abs(point_a_ele - point_b_ele)
-            time2 = height / 10
-            time = time1 + time2
+            distance = row[0]
+            time_walk = distance / 5000 * 60
+            time_walk_climb = distance / 5000 * 60 + abs(ele_start - ele_end) / 10
 
             # add weighed edges
-            if point_a_ele >= point_b_ele:
-                g.add_edge(point_a_id, point_b_id, weight=time1)
-                g.add_edge(point_b_id, point_a_id, weight=time)
+            if ele_start >= ele_end:
+                g.add_edge(row[2], row[3], fid=column_name, weight=time_walk)
+                g.add_edge(row[3], row[2], fid=column_name, weight=time_walk_climb)
             else:
-                g.add_edge(point_a_id, point_b_id, weight=time)
-                g.add_edge(point_b_id, point_a_id, weight=time1)
+                g.add_edge(row[2], row[3], fid=column_name, weight=time_walk_climb)
+                g.add_edge(row[3], row[2], fid=column_name, weight=time_walk)
 
         # calculate shortest path
-        path = nx.dijkstra_path(g, source=self.__start, target=self.__end)
-        return path
+        path = nx.dijkstra_path(g, source=start_point_name, target=end_point_name)
+
+        # creating Geodataframe for path
+        links = []
+        geom = []
+        first_node = path[0]
+        for node in path[1:]:
+            link_fid = g.edges[first_node, node]["fid"]
+            links.append(link_fid)
+            geom.append(LineString(self.__roads_table[link_fid][1]))
+            first_node = node
+        path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
+
+        # adding the shortest_path_gpd to return
+        return path, path_gpd
 
 
 def main():
@@ -334,25 +306,21 @@ def main():
 
     # use island shp to clip the buffer and get the highest point of available area
     print("Loading elevation dataset...")
-    elevation_data = Elevation("Material/elevation/SZ.asc").get_elevation()
-    elevation_data_info = Elevation("Material/elevation/SZ.asc").elevation_data_info()
+    elevation = ReadElevation("Material/elevation/SZ.asc").get_elevation_data()
+    area_ele = ClipElevation("Material/elevation/SZ.asc", user_point, island).get_area_ele()
 
     print("Searching for highest point within 5km...")
-    shparea = user_point.buffer(5000).intersection(island)
-    highest_point = Elevation("Material/elevation/SZ.asc").get_max_point(shparea, user_point)
-    print("The highest point within 5km is:", highest_point)
+    nearest_highest_point_index, nearest_highest_point = HighestPoint(elevation, area_ele).get_highest_point(user_point)
+    print("The highest point within 5km is:", nearest_highest_point)
 
     # find nearest point
     print("Searching for available path...")
-    road_point = ReadNodesFromShp("Material/roads/nodes.shp").get_nodes()
-    attribute = ReadNodesFromShp("Material/roads/nodes.shp").get_point_attribute()
-    user_point_id, safe_point_id = NearestITN(user_point, highest_point, road_point).Rtree(attribute)
-    print("Path Start Point ID:", user_point_id, "\nPath End Point ID:", safe_point_id)
+    roads_table, nodes_table = ReadITN("Material/itn/solent_itn.json").get_itn()
+    start_point_name, end_point_name = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
+    print("Path Start Point ID:", start_point_name, "\nPath End Point ID:", end_point_name)
 
     print("Calculating the shortest path...")
-    path = ShortestPath("Material/itn/solent_itn.json", elevation_data, elevation_data_info).get_path(user_point_id,
-                                                                                                      safe_point_id)
-    # print(path)
+    path, path_gpd = ShortestPath(elevation, roads_table, nodes_table).get_path(start_point_name, end_point_name)
     print("Path created.")
 
 
