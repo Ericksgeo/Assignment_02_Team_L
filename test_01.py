@@ -287,6 +287,8 @@ class ShortestPath:
         for n, point in enumerate(point_list):
             idx.insert(n, point, str(n))
 
+        end_point_name_set = set()
+
         while True:
             start_point_name_new = start_point_name
             end_point_name_new = end_point_name
@@ -312,19 +314,21 @@ class ShortestPath:
                 if points.distance(user_point) > 5000:
                     print('check1')
                     while True:
-                        print(nearest_highest_point_index)
+                        end_point_name_set.add(end_point_name)
+                        print(end_point_name_set)
                         area_ele[nearest_highest_point_index[0], nearest_highest_point_index[1]] = 0
-                        print(area_ele[nearest_highest_point_index[0], nearest_highest_point_index[1]])
                         nearest_highest_point_index, nearest_highest_point = HighestPoint(self.__elevation,
                                                                                           area_ele).get_highest_point(
                             user_point)
                         print(nearest_highest_point_index)
-                        for k in idx.nearest(nearest_highest_point):
+                        for k in idx.nearest((nearest_highest_point.x, nearest_highest_point.y)):
                             index2 = k
                         end_point_name_new = nodes_name_list[index2]
                         print(end_point_name_new, end_point_name)
                         print(area_ele[nearest_highest_point_index[0], nearest_highest_point_index[1]])
-                        if end_point_name_new != end_point_name:
+                        print(end_point_name_new in end_point_name_set)
+                        # if (end_point_name_new != end_point_name) and (end_point_name_new in end_point_name_set == False):
+                        if end_point_name_new not in end_point_name_set:
                             button = 0
                             break
                 if button == 0:
