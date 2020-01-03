@@ -182,6 +182,8 @@ class ClipElevation:
         with rasterio.open(self.__filepath) as scr:
             out_image, out_transform = rasterio.mask.mask(scr, user_features, crop=False)
             area_ele = out_image.reshape(out_image.shape[1], out_image.shape[2])
+
+        # use set() to record all elevation data and sort them by numerical value
         ele_set = set()
         [row, col] = area_ele.shape
         for i in range(row):
@@ -226,30 +228,39 @@ class MedianPoint:
         median_point_list = []
         median_point_list_a = []
         median_point_list_b = []
+
+        # there are two median points when the length of ele_value_list is even
         if len(ele_value_list) % 2 == 0:
-            median_num_a = len(ele_value_list)/2
-            median_num_b = len(ele_value_list)/2 + 1
+            median_num_a = len(ele_value_list) / 2
+            median_num_b = len(ele_value_list) / 2 + 1
             ele_value_a = ele_value_list[int(median_num_a - 1)]
             ele_value_b = ele_value_list[int(median_num_b - 1)]
+
+            # find index of all points with a certain height
             median_index_a = np.where(self.__area_ele == ele_value_a)
             median_index_b = np.where(self.__area_ele == ele_value_b)
+
+            # use rasterio spatial index function to query coordinates of each point
             for i in range(len(median_index_a[0])):
                 median_point_list_a.append((self.__elevation.xy(median_index_a[0][i], median_index_a[1][i])))
             for j in range(len(median_index_b[0])):
                 median_point_list_b.append((self.__elevation.xy(median_index_b[0][j], median_index_b[1][j])))
             median_point_list = [median_point_list_a, median_point_list_b]
-            list_length_next = len(ele_value_list)/2
-            print(median_num_a, median_num_b)
+
+            # calculate the length of ele_value_list need to be iterated in next loop
+            list_length_next = len(ele_value_list) / 2
             print(ele_value_a, ele_value_b)
+
+        # only one median point when the length of ele_value_list is odd
         else:
-            median_num = len(ele_value_list)//2+1
+            median_num = len(ele_value_list) // 2 + 1
             ele_value = ele_value_list[int(median_num - 1)]
             median_index = np.where(self.__area_ele == ele_value)
             for i in range(len(median_index[0])):
                 median_point_list.append((self.__elevation.xy(median_index[0][i], median_index[1][i])))
             median_point_list = [median_point_list]
-            list_length_next = len(ele_value_list)//2
-            print(median_index)
+            list_length_next = len(ele_value_list) // 2
+
             print(ele_value)
 
         return median_point_list, list_length_next
@@ -284,13 +295,19 @@ class NearestITN:
 
 class ShortestPath:
 
-    def __init__(self, elevation, roads_table, nodes_table):
+    def __init__(self, elevation, area_ele, user_point, start_point_id, end_point_id, roads_table, nodes_table):
         self.__elevation = elevation
+        self.__area_ele = area_ele
+        self.__user_point = user_point
+        self.__start_point_id = start_point_id
+        self.__end_point_id = end_point_id
         self.__elematrix = self.__elevation.read(1)
         self.__roads_table = roads_table
         self.__nodes_table = nodes_table
 
     def get_path_point(self, g):
+
+        # get the segment points of path, put them into geopandas DataFrame
         links = []
         geom = []
         first_node = self.__path[0]
@@ -301,6 +318,7 @@ class ShortestPath:
             first_node = node
         path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
 
+        # put them into a list
         path_point_list = []
         for i in range(len(geom)):
             for k in range(len(geom[i].xy[0])):
@@ -309,7 +327,7 @@ class ShortestPath:
                 path_point_list.append(Point(path_point_x, path_point_y))
         return path_point_list, path_gpd
 
-    def get_path(self, user_point, start_point_id, end_point_id):
+    def get_path(self):
         g = nx.DiGraph()
         for column_name, row in self.__roads_table.iteritems():
             # get coordinates of start point and end point of each road
@@ -337,58 +355,61 @@ class ShortestPath:
                 g.add_edge(row[2], row[3], fid=column_name, weight=time_walk_climb)
                 g.add_edge(row[3], row[2], fid=column_name, weight=time_walk)
 
-        # calculate shortest path
-        self.__path = nx.dijkstra_path(g, source=start_point_id, target=end_point_id)
+        # calculate shortest path and determine whether it is a special case
+        self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=self.__end_point_id)
         trigger = 0
         path_point_list, path_gpd = self.get_path_point(g)
         for points in path_point_list:
-            if points.distance(user_point) > 5000:
+            if points.distance(self.__user_point) > 5000:
                 trigger = 1
         return self.__path, path_gpd, g, trigger
 
-    def special_case(self, user_point, start_point_id, idx, g, area_ele, ele_value_list):
+    def special_case(self, idx, g, ele_value_list):
         # adding the shortest_path_gpd to return
-        path_point_list = []
         nodes_name_list = self.__nodes_table.columns.tolist()
+        ele_work_point_list = []
+        end_point_id_list = []
+        # adding the shortest_path_gpd to return
         while True:
             trigger1 = 0
             length = 0
             ele_value_list_new = ele_value_list
+            median_point_list, list_length_next = MedianPoint(self.__elevation, self.__area_ele).get_median_point(
+                ele_value_list)
 
-            print('check1', len(ele_value_list))
-            median_point_list, list_length_next = MedianPoint(self.__elevation, area_ele).get_median_point(ele_value_list)
-            print(list_length_next, median_point_list)
+            # get list length that contains all points need to be tested
             if len(median_point_list) == 2:
-                length = len(median_point_list[0])+len(median_point_list[1])
+                length = len(median_point_list[0]) + len(median_point_list[1])
             elif len(median_point_list) == 1:
                 length = len(median_point_list[0])
-            print("length:", length)
-
-            ele_work_point_list = []
-            end_point_id_list = []
             count = 0
+
+            # use for loop to test these points
             for m in range(len(median_point_list)):
                 for n in range(len(median_point_list[m])):
                     count += 1
-                    print("count:", count)
+
+                    # get the ITN and path of each point
                     for x in idx.nearest(median_point_list[m][n]):
                         trigger = 0
                         index2 = x
                         end_point_id_new = nodes_name_list[index2]
-                        self.__path = nx.dijkstra_path(g, source=start_point_id, target=end_point_id_new)
+                        self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id_new)
                         path_point_list, path_gpd = self.get_path_point(g)
 
+                        # if any segment point of current path is out of the 5km buffer range, break the loop
                         for points in path_point_list:
-                            if points.distance(user_point) > 5000:
+                            if points.distance(self.__user_point) > 5000:
                                 trigger = 1
                                 break
 
+                        # if all points of current path is in the 5km buffer range, trigger will not be activated
                         if trigger == 0:
-                            print('check2')
                             trigger1 = 1
                             ele_work_point_list.append(median_point_list[m][n])
                             end_point_id_list.append(end_point_id_new)
 
+                            # clip the list that contains all the elevation values to search from higher part
                             if len(median_point_list) == 2:
                                 ele_value_list_new = ele_value_list[int(list_length_next):]
                             elif len(median_point_list) == 1:
@@ -397,27 +418,29 @@ class ShortestPath:
                                 else:
                                     ele_value_list_new = ele_value_list[(int(list_length_next) + 1):]
 
+                        # if no point of current elevation value pass the test, clip the list to search from lower part
                         if count == length and trigger1 != 1:
                             ele_value_list_new = ele_value_list[0:int(list_length_next)]
                             break
 
+            # break the while loop when finish all tests
             ele_value_list = ele_value_list_new
             if int(list_length_next) == 0:
                 break
-        print(ele_work_point_list, end_point_id_list)
-        nearest_highest_point = [[(ele_work_point_list[0][0], ele_work_point_list[0][1])]]
-        end_point_id = end_point_id_list[0]
-        distance_max = 10000
 
-        if len(ele_work_point_list) > 1:
-            for i in range(len(ele_work_point_list)):
-                distance = (abs(ele_work_point_list[i][0] - user_point.x) ** 2 + abs(ele_work_point_list[i][1] - user_point.y) ** 2) ** 0.5
-                if distance < distance_max:
-                    distance_max = distance
-                    nearest_highest_point = [[(ele_work_point_list[i][0], ele_work_point_list[i][1])]]
-                    end_point_id = end_point_id_list[i]
-
-        self.__path = nx.dijkstra_path(g, source=start_point_id, target=end_point_id)
+        # choose the highest one from all candidate points and get its path
+        height_max = 0
+        index = 0
+        for i in range(len(ele_work_point_list)):
+            candidate_point = Point(ele_work_point_list[i][0], ele_work_point_list[i][1])
+            row, col = self.__elevation.index(candidate_point.x, candidate_point.y)
+            height = self.__area_ele[row, col]
+            if height >= height_max:
+                height_max = height
+                index = i
+        nearest_highest_point = [[ele_work_point_list[index]]]
+        end_point_id = end_point_id_list[index]
+        self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id)
         path_point_list, path_gpd = self.get_path_point(g)
 
         return self.__path, path_gpd, nearest_highest_point, end_point_id
@@ -450,11 +473,11 @@ def main():
     start_point_id, end_point_id, idx = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
 
     print("Calculating the shortest path...")
-    path, path_gpd, g, trigger = ShortestPath(elevation, roads_table, nodes_table).get_path(user_point, start_point_id, end_point_id)
+    path, path_gpd, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id, roads_table, nodes_table).get_path()
     if trigger == 1:
-        path, path_gpd, nearest_highest_point, end_point_id = ShortestPath(elevation, roads_table, nodes_table).special_case(user_point, start_point_id, idx, g, area_ele, ele_value_list)
+        path, path_gpd, nearest_highest_point, end_point_id = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id, roads_table, nodes_table).special_case(idx, g, ele_value_list)
 
-    print("-"*200)
+    print("-" * 200)
     print("The highest point available is:", nearest_highest_point[0][0])
     print("Path Start Point ID:", start_point_id, "\nPath End Point ID:", end_point_id)
     print(path)
@@ -464,4 +487,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
