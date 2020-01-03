@@ -282,11 +282,6 @@ class NearestITN:
         return start_point_name, end_point_name, idx
 
 
-class PathPoint:
-    def __init__(self, path):
-        self.__path = path
-
-
 class ShortestPath:
 
     def __init__(self, elevation, roads_table, nodes_table):
@@ -412,8 +407,6 @@ class ShortestPath:
         print(ele_work_point_list, end_point_id_list)
         nearest_highest_point = [[(ele_work_point_list[0][0], ele_work_point_list[0][1])]]
         end_point_id = end_point_id_list[0]
-
-
         distance_max = 10000
 
         if len(ele_work_point_list) > 1:
