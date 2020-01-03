@@ -292,12 +292,12 @@ class ShortestPath:
 
 
 def main():
-    # creating window using the MyWindow class
-    window = MyWindow()
-    window.root.title('FLOOD EMERGENCY PLANNING')
-    window.root.geometry("450x300+500+200")
-    window.root.protocol("WM_DELETE_WINDOW", window.on_closing)
-    window.root.mainloop()
+    # # creating window using the MyWindow class
+    # window = MyWindow()
+    # window.root.title('FLOOD EMERGENCY PLANNING')
+    # window.root.geometry("450x300+500+200")
+    # window.root.protocol("WM_DELETE_WINDOW", window.on_closing)
+    # window.root.mainloop()
 
     # test whether input point is in the island boundaries
     user_point = Point(window.e, window.n)

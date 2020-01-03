@@ -304,7 +304,7 @@ class ShortestPath:
             links.append(link_fid)
             geom.append(LineString(self.__roads_table[link_fid][1]))
             first_node = node
-         # path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
+        path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
 
         path_point_list = []
         for i in range(len(geom)):
@@ -312,7 +312,7 @@ class ShortestPath:
                 path_point_x = geom[i].xy[0][k]
                 path_point_y = geom[i].xy[1][k]
                 path_point_list.append(Point(path_point_x, path_point_y))
-        return path_point_list
+        return path_point_list, path_gpd
 
     def get_path(self, user_point, start_point_id, end_point_id):
         g = nx.DiGraph()
@@ -345,18 +345,17 @@ class ShortestPath:
         # calculate shortest path
         self.__path = nx.dijkstra_path(g, source=start_point_id, target=end_point_id)
         trigger = 0
-        path_point_list = self.get_path_point(g)
+        path_point_list, path_gpd = self.get_path_point(g)
         for points in path_point_list:
             if points.distance(user_point) > 5000:
                 trigger = 1
-        return self.__path, path_point_list, g, trigger
+        return self.__path, path_gpd, g, trigger
 
     def special_case(self, user_point, start_point_id, idx, g, area_ele, ele_value_list):
         # adding the shortest_path_gpd to return
         path_point_list = []
         nodes_name_list = self.__nodes_table.columns.tolist()
         while True:
-            start_point_id_new = start_point_id
             trigger1 = 0
             length = 0
             ele_value_list_new = ele_value_list
@@ -381,8 +380,8 @@ class ShortestPath:
                         trigger = 0
                         index2 = x
                         end_point_id_new = nodes_name_list[index2]
-                        self.__path = nx.dijkstra_path(g, source=start_point_id_new, target=end_point_id_new)
-                        path_point_list = self.get_path_point(g)
+                        self.__path = nx.dijkstra_path(g, source=start_point_id, target=end_point_id_new)
+                        path_point_list, path_gpd = self.get_path_point(g)
 
                         for points in path_point_list:
                             if points.distance(user_point) > 5000:
@@ -413,6 +412,8 @@ class ShortestPath:
         print(ele_work_point_list, end_point_id_list)
         nearest_highest_point = [[(ele_work_point_list[0][0], ele_work_point_list[0][1])]]
         end_point_id = end_point_id_list[0]
+
+
         distance_max = 10000
 
         if len(ele_work_point_list) > 1:
@@ -423,7 +424,10 @@ class ShortestPath:
                     nearest_highest_point = [[(ele_work_point_list[i][0], ele_work_point_list[i][1])]]
                     end_point_id = end_point_id_list[i]
 
-        return self.__path, path_point_list, nearest_highest_point, end_point_id
+        self.__path = nx.dijkstra_path(g, source=start_point_id, target=end_point_id)
+        path_point_list, path_gpd = self.get_path_point(g)
+
+        return self.__path, path_gpd, nearest_highest_point, end_point_id
 
 
 def main():
@@ -453,14 +457,15 @@ def main():
     start_point_id, end_point_id, idx = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
 
     print("Calculating the shortest path...")
-    path, path_point_list, g, trigger = ShortestPath(elevation, roads_table, nodes_table).get_path(user_point, start_point_id, end_point_id)
+    path, path_gpd, g, trigger = ShortestPath(elevation, roads_table, nodes_table).get_path(user_point, start_point_id, end_point_id)
     if trigger == 1:
-        path, path_point_list, nearest_highest_point, end_point_id = ShortestPath(elevation, roads_table, nodes_table).special_case(user_point, start_point_id, idx, g, area_ele, ele_value_list)
+        path, path_gpd, nearest_highest_point, end_point_id = ShortestPath(elevation, roads_table, nodes_table).special_case(user_point, start_point_id, idx, g, area_ele, ele_value_list)
 
-    print("-"*100)
+    print("-"*200)
     print("The highest point available is:", nearest_highest_point[0][0])
     print("Path Start Point ID:", start_point_id, "\nPath End Point ID:", end_point_id)
     print(path)
+    print(path_gpd)
     print("Path created.")
 
 
