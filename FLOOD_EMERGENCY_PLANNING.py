@@ -8,10 +8,12 @@ from shapely.geometry import Point, Polygon, LineString
 import shapefile
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 import rasterio
 from rtree import index
 import networkx as nx
-import geopandas as gpd
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
 
 
 # creating UI to input coordinates
@@ -182,10 +184,19 @@ class ClipElevation:
         with rasterio.open(self.__filepath) as scr:
             out_image, out_transform = rasterio.mask.mask(scr, user_features, crop=False)
             area_ele = out_image.reshape(out_image.shape[1], out_image.shape[2])
-        return area_ele
+
+        # use set() to record all elevation data and sort them by numerical value
+        ele_set = set()
+        [row, col] = area_ele.shape
+        for i in range(row):
+            for j in range(col):
+                ele_set.add(area_ele[i, j])
+        ele_value_list = list(ele_set)
+        ele_value_list.sort()
+        return safe_area, area_ele, ele_value_list
 
 
-class HighestPoint:
+class FindPoint:
 
     def __init__(self, elevation, area_ele):
         self.__elevation = elevation
@@ -196,8 +207,8 @@ class HighestPoint:
         row_user, col_user = self.__elevation.index(user_point.x, user_point.y)
 
         # choose the nearest highest point
-        nearest_highest_point_index = (0, 0)
-        nearest_highest_point = (0, 0)
+        nearest_highest_point_index = (highest_index[0][0], highest_index[1][0])
+        nearest_highest_point = [[(self.__elevation.xy(highest_index[0][0], highest_index[1][0]))]]
         distance_max = 10000
         if len(highest_index[0]) > 1:
             for i in range(len(highest_index[0])):
@@ -205,14 +216,52 @@ class HighestPoint:
                 if distance < distance_max:
                     distance_max = distance
                     nearest_highest_point_index = (highest_index[0][i], highest_index[1][i])
-                    nearest_highest_point = Point(self.__elevation.xy(highest_index[0][i], highest_index[1][i]))
+                    nearest_highest_point = [[(self.__elevation.xy(highest_index[0][i], highest_index[1][i]))]]
         return nearest_highest_point_index, nearest_highest_point
+
+    def get_median_point(self, ele_value_list):
+        median_point_list = []
+        median_point_list_a = []
+        median_point_list_b = []
+
+        # there are two median points when the length of ele_value_list is even
+        if len(ele_value_list) % 2 == 0:
+            median_num_a = len(ele_value_list) / 2
+            median_num_b = len(ele_value_list) / 2 + 1
+            ele_value_a = ele_value_list[int(median_num_a - 1)]
+            ele_value_b = ele_value_list[int(median_num_b - 1)]
+
+            # find index of all points with a certain height
+            median_index_a = np.where(self.__area_ele == ele_value_a)
+            median_index_b = np.where(self.__area_ele == ele_value_b)
+
+            # use rasterio spatial index function to query coordinates of each point
+            for i in range(len(median_index_a[0])):
+                median_point_list_a.append((self.__elevation.xy(median_index_a[0][i], median_index_a[1][i])))
+            for j in range(len(median_index_b[0])):
+                median_point_list_b.append((self.__elevation.xy(median_index_b[0][j], median_index_b[1][j])))
+            median_point_list = [median_point_list_a, median_point_list_b]
+
+            # calculate the length of ele_value_list need to be iterated in next loop
+            list_length_next = len(ele_value_list) / 2
+
+        # only one median point when the length of ele_value_list is odd
+        else:
+            median_num = len(ele_value_list) // 2 + 1
+            ele_value = ele_value_list[int(median_num - 1)]
+            median_index = np.where(self.__area_ele == ele_value)
+            for i in range(len(median_index[0])):
+                median_point_list.append((self.__elevation.xy(median_index[0][i], median_index[1][i])))
+            median_point_list = [median_point_list]
+            list_length_next = len(ele_value_list) // 2
+
+        return median_point_list, list_length_next
 
 
 class NearestITN:
-    def __init__(self, user_point, nearest_highest_point, nodes_table):
+    def __init__(self, user_point, target_point, nodes_table):
         self.__user_point = (user_point.x, user_point.y)
-        self.__nearest_highest_point = (nearest_highest_point.x, nearest_highest_point.y)
+        self.__target_point = target_point
         self.__nodes_table = nodes_table
 
     def get_nearest_itn(self):
@@ -229,23 +278,47 @@ class NearestITN:
             idx.insert(n, point, str(n))
         for j in idx.nearest(self.__user_point):
             index1 = j
-        for k in idx.nearest(self.__nearest_highest_point):
+        for k in idx.nearest(self.__target_point[0][0]):
             index2 = k
         start_point_name = nodes_name_list[index1]
         end_point_name = nodes_name_list[index2]
-        return start_point_name, end_point_name
+        return start_point_name, end_point_name, idx
 
 
 class ShortestPath:
 
-    def __init__(self, elevation, roads_table, nodes_table):
+    def __init__(self, elevation, area_ele, user_point, start_point_id, end_point_id, roads_table, nodes_table):
         self.__elevation = elevation
+        self.__area_ele = area_ele
+        self.__user_point = user_point
+        self.__start_point_id = start_point_id
+        self.__end_point_id = end_point_id
         self.__elematrix = self.__elevation.read(1)
         self.__roads_table = roads_table
         self.__nodes_table = nodes_table
 
-    def get_path(self, start_point_name, end_point_name):
+    def get_path_point(self, g):
+        # get the segment points of path, put them into geopandas DataFrame
+        links = []
+        geom = []
+        first_node = self.__path[0]
+        for node in self.__path[1:]:
+            link_fid = g.edges[first_node, node]["fid"]
+            links.append(link_fid)
+            geom.append(LineString(self.__roads_table[link_fid][1]))
+            first_node = node
+        path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
 
+        # put them into a list
+        path_point_list = []
+        for i in range(len(geom)):
+            for k in range(len(geom[i].xy[0])):
+                path_point_x = geom[i].xy[0][k]
+                path_point_y = geom[i].xy[1][k]
+                path_point_list.append(Point(path_point_x, path_point_y))
+        return path_point_list, path_gpd
+
+    def get_path(self):
         g = nx.DiGraph()
         for column_name, row in self.__roads_table.iteritems():
             # get coordinates of start point and end point of each road
@@ -273,31 +346,163 @@ class ShortestPath:
                 g.add_edge(row[2], row[3], fid=column_name, weight=time_walk_climb)
                 g.add_edge(row[3], row[2], fid=column_name, weight=time_walk)
 
-        # calculate shortest path
-        path = nx.dijkstra_path(g, source=start_point_name, target=end_point_name)
+        # calculate shortest path and determine whether it is a special case
+        self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=self.__end_point_id)
+        trigger = 0
+        path_point_list, path_gpd = self.get_path_point(g)
+        for points in path_point_list:
+            if points.distance(self.__user_point) > 5000:
+                trigger = 1
+        return self.__path, path_gpd, g, trigger
 
-        # creating Geodataframe for path
-        links = []
-        geom = []
-        first_node = path[0]
-        for node in path[1:]:
-            link_fid = g.edges[first_node, node]["fid"]
-            links.append(link_fid)
-            geom.append(LineString(self.__roads_table[link_fid][1]))
-            first_node = node
-        path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
+    def special_case(self, idx, g, ele_value_list):
+        # adding the shortest_path_gpd to return
+        nodes_name_list = self.__nodes_table.columns.tolist()
+        ele_work_point_list = []
+        end_point_id_list = []
 
         # adding the shortest_path_gpd to return
-        return path, path_gpd
+        while True:
+            trigger1 = 0
+            length = 0
+            ele_value_list_new = ele_value_list
+            median_point_list, list_length_next = FindPoint(self.__elevation, self.__area_ele).get_median_point(
+                ele_value_list)
+
+            # get list length that contains all points need to be tested
+            if len(median_point_list) == 2:
+                length = len(median_point_list[0]) + len(median_point_list[1])
+            elif len(median_point_list) == 1:
+                length = len(median_point_list[0])
+            count = 0
+
+            # use for loop to test these points
+            for m in range(len(median_point_list)):
+                for n in range(len(median_point_list[m])):
+                    count += 1
+
+                    # get the ITN and path of each point
+                    for x in idx.nearest(median_point_list[m][n]):
+                        trigger = 0
+                        index2 = x
+                        end_point_id_new = nodes_name_list[index2]
+                        self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id_new)
+                        path_point_list, path_gpd = self.get_path_point(g)
+
+                        # if any segment point of current path is out of the 5km buffer range, break the loop
+                        for points in path_point_list:
+                            if points.distance(self.__user_point) > 5000:
+                                trigger = 1
+                                break
+
+                        # if all points of current path is in the 5km buffer range, trigger will not be activated
+                        if trigger == 0:
+                            trigger1 = 1
+                            ele_work_point_list.append(median_point_list[m][n])
+                            end_point_id_list.append(end_point_id_new)
+
+                            # clip the list that contains all the elevation values to search from higher part
+                            if len(median_point_list) == 2:
+                                ele_value_list_new = ele_value_list[int(list_length_next):]
+                            elif len(median_point_list) == 1:
+                                if int(list_length_next) == 0:
+                                    ele_value_list_new = ele_value_list[0]
+                                else:
+                                    ele_value_list_new = ele_value_list[(int(list_length_next) + 1):]
+
+                        # if no point of current elevation value pass the test, clip the list to search from lower part
+                        if count == length and trigger1 != 1:
+                            ele_value_list_new = ele_value_list[0:int(list_length_next)]
+                            break
+
+            # break the while loop when finish all tests
+            ele_value_list = ele_value_list_new
+            if int(list_length_next) == 0:
+                break
+
+        # choose the highest one from all candidate points and get its path
+        height_max = 0
+        index = 0
+        for i in range(len(ele_work_point_list)):
+            candidate_point = Point(ele_work_point_list[i][0], ele_work_point_list[i][1])
+            row, col = self.__elevation.index(candidate_point.x, candidate_point.y)
+            height = self.__area_ele[row, col]
+            if height >= height_max:
+                height_max = height
+                index = i
+        nearest_highest_point = [[ele_work_point_list[index]]]
+        end_point_id = end_point_id_list[index]
+        self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id)
+        path_point_list, path_gpd = self.get_path_point(g)
+
+        return self.__path, path_gpd, nearest_highest_point, end_point_id
+
+
+class MapPlotting:
+
+    def __init__(self):
+        self.fig = plt.figure(figsize=(4, 3), dpi=300)
+        self.ax = self.fig.add_subplot(1, 1, 1, projection=ccrs.OSGB())
+
+    def show_result(self, bg_file, elevation, path, user_point, start_point, end_point):
+
+        # plot background
+        x0 = user_point.x
+        y0 = user_point.y
+        background = rasterio.open(str(bg_file))
+        back_array = background.read(1)
+        palette = np.array([value for key, value in background.colormap(1).items()])
+        background_image = palette[back_array]
+        bounds = background.bounds
+        extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+        display_extent = [x0 - 5000, x0 + 5000, y0 - 5000, y0 + 5000]
+        if x0 - 5000 < bounds.left:
+            display_extent[0] = bounds.left
+            display_extent[1] = bounds.left + 10000
+        if x0 + 5000 > bounds.right:
+            display_extent[1] = bounds.right
+            display_extent[0] = bounds.right - 10000
+        if y0 - 5000 < bounds.bottom:
+            display_extent[2] = bounds.bottom
+            display_extent[3] = bounds.bottom + 10000
+        if y0 + 5000 > bounds.top:
+            display_extent[3] = bounds.top
+            display_extent[2] = bounds.top - 10000
+        self.ax.imshow(background_image, origin="upper", extent=extent, zorder=1)
+        self.ax.set_extent(display_extent, crs=ccrs.OSGB())
+
+        # plot buffer
+        buffer = plt.Circle((x0, y0), 5000, color="b", alpha=0.1, zorder=3)
+        self.ax.add_patch(buffer)
+
+        # plot point
+        plt.plot([start_point[0]], [start_point[1]], "o", color="#F54B0C", markersize=2, zorder=5)
+        plt.plot([end_point[0]], [end_point[1]], "o", color="#008053", markersize=2, zorder=5)
+
+        # plot path
+        path.plot(ax=self.ax, edgecolor="#FFEB00", linewidth=0.5, zorder=4)
+
+        # plot elevation and colorbar
+        elevation[elevation == 0] = np.NaN
+        ele = self.ax.imshow(elevation, interpolation='nearest', extent=[425000, 470000, 75000, 100000], origin="upper",
+                             cmap='terrain', zorder=2, alpha=0.5)
+        elebar = plt.colorbar(ele, fraction=0.046, pad=0.04)
+        elebar.ax.tick_params(labelsize=5)
+
+        # plot title
+        plt.title("Emergency Path Planning",fontsize=8)
+
+        # show
+        plt.show()
 
 
 def main():
-    # # creating window using the MyWindow class
-    # window = MyWindow()
-    # window.root.title('FLOOD EMERGENCY PLANNING')
-    # window.root.geometry("450x300+500+200")
-    # window.root.protocol("WM_DELETE_WINDOW", window.on_closing)
-    # window.root.mainloop()
+    # creating window using the MyWindow class
+    window = MyWindow()
+    window.root.title('FLOOD EMERGENCY PLANNING')
+    window.root.geometry("450x300+500+200")
+    window.root.protocol("WM_DELETE_WINDOW", window.on_closing)
+    window.root.mainloop()
 
     # test whether input point is in the island boundaries
     user_point = Point(window.e, window.n)
@@ -307,21 +512,35 @@ def main():
     # use island shp to clip the buffer and get the highest point of available area
     print("Loading elevation dataset...")
     elevation = ReadElevation("Material/elevation/SZ.asc").get_elevation_data()
-    area_ele = ClipElevation("Material/elevation/SZ.asc", user_point, island).get_area_ele()
+    safe_area, area_ele, ele_value_list = ClipElevation("Material/elevation/SZ.asc", user_point, island).get_area_ele()
 
     print("Searching for highest point within 5km...")
-    nearest_highest_point_index, nearest_highest_point = HighestPoint(elevation, area_ele).get_highest_point(user_point)
-    print("The highest point within 5km is:", nearest_highest_point)
+    nearest_highest_point_index, nearest_highest_point = FindPoint(elevation, area_ele).get_highest_point(user_point)
 
     # find nearest point
     print("Searching for available path...")
     roads_table, nodes_table = ReadITN("Material/itn/solent_itn.json").get_itn()
-    start_point_name, end_point_name = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
-    print("Path Start Point ID:", start_point_name, "\nPath End Point ID:", end_point_name)
+    start_point_id, end_point_id, idx = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
 
     print("Calculating the shortest path...")
-    path, path_gpd = ShortestPath(elevation, roads_table, nodes_table).get_path(start_point_name, end_point_name)
+    path, path_gpd, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id,
+                                              roads_table, nodes_table).get_path()
+    if trigger == 1:
+        path, path_gpd, nearest_highest_point, end_point_id = ShortestPath(elevation, area_ele, user_point,
+                                                                           start_point_id, end_point_id, roads_table,
+                                                                           nodes_table).special_case(idx, g,
+                                                                                                     ele_value_list)
+    start_point = nodes_table[start_point_id][0]
+    end_point = nodes_table[end_point_id][0]
+
+    print("-" * 150)
+    print("The highest point available is:", nearest_highest_point[0][0])
+    print("Path Start Point ID:", start_point_id, "\nPath End Point ID:", end_point_id)
     print("Path created.")
+
+    print("Map plotting...")
+    MapPlotting().show_result("Material/background/raster-50k_2724246.tif", area_ele, path_gpd, user_point, start_point,
+                              end_point)
 
 
 if __name__ == "__main__":
