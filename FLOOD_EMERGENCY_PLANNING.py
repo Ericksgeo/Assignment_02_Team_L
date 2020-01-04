@@ -4,6 +4,7 @@ from tkinter import messagebox
 import json
 import winsound
 import rasterio.mask
+from matplotlib.font_manager import FontProperties
 from shapely.geometry import Point, Polygon, LineString
 import shapefile
 import numpy as np
@@ -14,6 +15,9 @@ from rtree import index
 import networkx as nx
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
+from matplotlib_scalebar.scalebar import ScaleBar
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
 
 
 # creating UI to input coordinates
@@ -444,7 +448,7 @@ class MapPlotting:
         self.fig = plt.figure(figsize=(4, 3), dpi=300)
         self.ax = self.fig.add_subplot(1, 1, 1, projection=ccrs.OSGB())
 
-    def show_result(self, bg_file, elevation, path, user_point, start_point, end_point):
+    def show_result(self, bg_file, elevation, ele_box, path, user_point, start_point, end_point):
 
         # plot background
         x0 = user_point.x
@@ -476,21 +480,48 @@ class MapPlotting:
         self.ax.add_patch(buffer)
 
         # plot point
-        plt.plot([start_point[0]], [start_point[1]], "o", color="#F54B0C", markersize=2, zorder=5)
-        plt.plot([end_point[0]], [end_point[1]], "o", color="#008053", markersize=2, zorder=5)
+        start, = plt.plot([start_point[0]], [start_point[1]], "o", color="#F54B0C", markersize=4, zorder=5)
+        end, = plt.plot([end_point[0]], [end_point[1]], "o", color="green", markersize=4, zorder=5)
 
         # plot path
-        path.plot(ax=self.ax, edgecolor="#FFEB00", linewidth=0.5, zorder=4)
+        path.plot(ax=self.ax, edgecolor="#4a59ff", linewidth=1, zorder=4)
 
         # plot elevation and colorbar
         elevation[elevation == 0] = np.NaN
-        ele = self.ax.imshow(elevation, interpolation='nearest', extent=[425000, 470000, 75000, 100000], origin="upper",
-                             cmap='terrain', zorder=2, alpha=0.5)
+        left, bottom, right, top = ele_box
+        ele = self.ax.imshow(elevation, interpolation='nearest', extent=[left, right, bottom, top], origin="upper",
+                             cmap='terrain', zorder=2, alpha=0.4)
         elebar = plt.colorbar(ele, fraction=0.046, pad=0.04)
         elebar.ax.tick_params(labelsize=5)
 
+        # plot scale bar
+        # Source: https://pypi.org/project/matplotlib-scalebar/
+        font0 = FontProperties()
+        font0.set_size(5.)
+        font0.set_weight("normal")
+        scalebar = ScaleBar(5, length_fraction=0.2, frameon=True, location="lower left")
+        scalebar.set_font_properties(font0)
+        scalebar.set_box_alpha(0.7)
+        self.ax.add_artist(scalebar)
+
+        # plot north arrow
+        # Source: https://stackoverflow.com/questions/58088841/how-to-add-a-north-arrow-on-a-geopandas-map
+        self.ax.annotate(' ', xy=(0.07, 0.9), xytext=(0.07, 0.78),
+                         arrowprops=dict(arrowstyle="wedge", facecolor="black"), ha="center", va="center", fontsize=15,
+                         xycoords=self.ax.transAxes)
+        self.ax.text(0.07, 0.93, "N", horizontalalignment='center', verticalalignment='center', fontsize=6,
+                     transform=self.ax.transAxes)
+
+        # plot legend
+        # Source: https://matplotlib.org/3.1.1/tutorials/intermediate/legend_guide.html
+        blue_patch = mpatches.Patch(color="b", alpha=0.1, label="5km Area")
+        blue_line = mlines.Line2D([], [], linewidth=1, color="#4a59ff", markersize=8, label="Shortest Path")
+        plt.legend([blue_patch, blue_line, start, end],
+                   ["5km Area", "Shortest Path", "Path Start Point", "Path End Point"],
+                   loc="upper right", fontsize=5)
+
         # plot title
-        plt.title("Emergency Path Planning",fontsize=8)
+        plt.title("Emergency Path Planning", fontsize=8)
 
         # show
         plt.show()
@@ -513,6 +544,7 @@ def main():
     print("Loading elevation dataset...")
     elevation = ReadElevation("Material/elevation/SZ.asc").get_elevation_data()
     safe_area, area_ele, ele_value_list = ClipElevation("Material/elevation/SZ.asc", user_point, island).get_area_ele()
+    ele_box = elevation.bounds
 
     print("Searching for highest point within 5km...")
     nearest_highest_point_index, nearest_highest_point = FindPoint(elevation, area_ele).get_highest_point(user_point)
@@ -532,15 +564,16 @@ def main():
                                                                                                      ele_value_list)
     start_point = nodes_table[start_point_id][0]
     end_point = nodes_table[end_point_id][0]
-
     print("-" * 150)
     print("The highest point available is:", nearest_highest_point[0][0])
     print("Path Start Point ID:", start_point_id, "\nPath End Point ID:", end_point_id)
     print("Path created.")
 
+    print("-" * 150)
     print("Map plotting...")
-    MapPlotting().show_result("Material/background/raster-50k_2724246.tif", area_ele, path_gpd, user_point, start_point,
-                              end_point)
+    MapPlotting().show_result("Material/background/raster-50k_2724246.tif",
+                              area_ele, ele_box, path_gpd, user_point, start_point, end_point)
+    print("Finished.")
 
 
 if __name__ == "__main__":
