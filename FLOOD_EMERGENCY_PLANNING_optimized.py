@@ -194,7 +194,7 @@ class ClipElevation:
         return safe_area, area_ele, ele_value_list
 
 
-class HighestPoint:
+class FindPoint:
 
     def __init__(self, elevation, area_ele):
         self.__elevation = elevation
@@ -216,13 +216,6 @@ class HighestPoint:
                     nearest_highest_point_index = (highest_index[0][i], highest_index[1][i])
                     nearest_highest_point = [[(self.__elevation.xy(highest_index[0][i], highest_index[1][i]))]]
         return nearest_highest_point_index, nearest_highest_point
-
-
-class MedianPoint:
-
-    def __init__(self, elevation, area_ele):
-        self.__elevation = elevation
-        self.__area_ele = area_ele
 
     def get_median_point(self, ele_value_list):
         median_point_list = []
@@ -249,7 +242,6 @@ class MedianPoint:
 
             # calculate the length of ele_value_list need to be iterated in next loop
             list_length_next = len(ele_value_list) / 2
-            print(ele_value_a, ele_value_b)
 
         # only one median point when the length of ele_value_list is odd
         else:
@@ -260,8 +252,6 @@ class MedianPoint:
                 median_point_list.append((self.__elevation.xy(median_index[0][i], median_index[1][i])))
             median_point_list = [median_point_list]
             list_length_next = len(ele_value_list) // 2
-
-            print(ele_value)
 
         return median_point_list, list_length_next
 
@@ -306,7 +296,6 @@ class ShortestPath:
         self.__nodes_table = nodes_table
 
     def get_path_point(self, g):
-
         # get the segment points of path, put them into geopandas DataFrame
         links = []
         geom = []
@@ -369,12 +358,13 @@ class ShortestPath:
         nodes_name_list = self.__nodes_table.columns.tolist()
         ele_work_point_list = []
         end_point_id_list = []
+
         # adding the shortest_path_gpd to return
         while True:
             trigger1 = 0
             length = 0
             ele_value_list_new = ele_value_list
-            median_point_list, list_length_next = MedianPoint(self.__elevation, self.__area_ele).get_median_point(
+            median_point_list, list_length_next = FindPoint(self.__elevation, self.__area_ele).get_median_point(
                 ele_value_list)
 
             # get list length that contains all points need to be tested
@@ -465,7 +455,7 @@ def main():
     safe_area, area_ele, ele_value_list = ClipElevation("Material/elevation/SZ.asc", user_point, island).get_area_ele()
 
     print("Searching for highest point within 5km...")
-    nearest_highest_point_index, nearest_highest_point = HighestPoint(elevation, area_ele).get_highest_point(user_point)
+    nearest_highest_point_index, nearest_highest_point = FindPoint(elevation, area_ele).get_highest_point(user_point)
 
     # find nearest point
     print("Searching for available path...")
