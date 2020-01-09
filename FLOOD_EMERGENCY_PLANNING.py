@@ -450,7 +450,7 @@ class MapPlotting:
         self.fig = plt.figure(figsize=(4, 3), dpi=300)
         self.ax = self.fig.add_subplot(1, 1, 1, projection=ccrs.OSGB())
 
-    def show_result(self, bg_file, elevation, ele_box, path, user_point, start_point, end_point):
+    def show_result(self, bg_file, elevation, ele_box, path, user_point, start_point, end_point, highest_point):
 
         # plot background
         x0 = user_point.x
@@ -483,7 +483,12 @@ class MapPlotting:
 
         # plot point
         start, = plt.plot([start_point[0]], [start_point[1]], "o", color="#F54B0C", markersize=4, zorder=5)
-        end, = plt.plot([end_point[0]], [end_point[1]], "o", color="green", markersize=4, zorder=5)
+        end, = plt.plot([end_point[0]], [end_point[1]], "o", color="blue", markersize=4, zorder=5)
+
+        # plot user point and highest point
+        highest, = plt.plot([highest_point[0][0][0]], [highest_point[0][0][1]], "*", color="green", markersize=4,
+                            zorder=5)
+        user, = plt.plot([x0], [y0], "*", color="yellow", markersize=4, zorder=5)
 
         # plot path
         path.plot(ax=self.ax, edgecolor="#4a59ff", linewidth=1, zorder=4)
@@ -518,9 +523,9 @@ class MapPlotting:
         # Source: https://matplotlib.org/3.1.1/tutorials/intermediate/legend_guide.html
         blue_patch = mpatches.Patch(color="b", alpha=0.1, label="5km Area")
         blue_line = mlines.Line2D([], [], linewidth=1, color="#4a59ff", markersize=8, label="Shortest Path")
-        plt.legend([blue_patch, blue_line, start, end],
-                   ["5km Area", "Shortest Path", "Path Start Point", "Path End Point"],
-                   loc="upper right", fontsize=5)
+        plt.legend([blue_patch, blue_line, start, end, user, highest],
+                   ["5km Area", "Shortest Path", "Path Start Point", "Path End Point", "Current Location",
+                    "Highest Point"], loc="upper right", fontsize=5)
 
         # plot title
         plt.title("Emergency Path Planning", fontsize=8)
@@ -557,13 +562,16 @@ def main():
     start_point_id, end_point_id, idx = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
 
     print("Calculating the shortest path...")
-    path, path_gpd, path_length, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id,
-                                              roads_table, nodes_table).get_path()
+    path, path_gpd, path_length, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id,
+                                                           end_point_id,
+                                                           roads_table, nodes_table).get_path()
     if trigger == 1:
         path, path_gpd, path_length, nearest_highest_point, end_point_id = ShortestPath(elevation, area_ele, user_point,
-                                                                           start_point_id, end_point_id, roads_table,
-                                                                           nodes_table).special_case(idx, g,
-                                                                                                     ele_value_list)
+                                                                                        start_point_id, end_point_id,
+                                                                                        roads_table,
+                                                                                        nodes_table).special_case(idx,
+                                                                                                                  g,
+                                                                                                                  ele_value_list)
     start_point = nodes_table[start_point_id][0]
     end_point = nodes_table[end_point_id][0]
     print("-" * 150)
@@ -575,7 +583,7 @@ def main():
     print("-" * 150)
     print("Map plotting...")
     MapPlotting().show_result("Material/background/raster-50k_2724246.tif",
-                              area_ele, ele_box, path_gpd, user_point, start_point, end_point)
+                              area_ele, ele_box, path_gpd, user_point, start_point, end_point, nearest_highest_point)
     print("Finished.")
 
 
