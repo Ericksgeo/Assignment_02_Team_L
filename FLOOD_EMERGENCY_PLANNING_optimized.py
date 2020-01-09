@@ -4,7 +4,8 @@ from tkinter import messagebox
 import json
 import winsound
 import rasterio.mask
-from shapely.geometry import Point, Polygon, LineString, MultiLineString
+from matplotlib.font_manager import FontProperties
+from shapely.geometry import Point, Polygon, LineString
 import shapefile
 import numpy as np
 import pandas as pd
@@ -12,6 +13,11 @@ import geopandas as gpd
 import rasterio
 from rtree import index
 import networkx as nx
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
+from matplotlib_scalebar.scalebar import ScaleBar
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
 
 
 # creating UI to input coordinates
@@ -145,6 +151,7 @@ class ReadITN:
             solent_itn = json.load(f)
         roads_table = pd.DataFrame(solent_itn['roadlinks'])
         nodes_table = pd.DataFrame(solent_itn['roadnodes'])
+        print(roads_table)
         return roads_table, nodes_table
 
 
@@ -299,11 +306,13 @@ class ShortestPath:
         # get the segment points of path, put them into geopandas DataFrame
         links = []
         geom = []
+        path_length = 0
         first_node = self.__path[0]
         for node in self.__path[1:]:
             link_fid = g.edges[first_node, node]["fid"]
             links.append(link_fid)
             geom.append(LineString(self.__roads_table[link_fid][1]))
+            path_length = path_length + self.__roads_table[link_fid][0]
             first_node = node
         path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
 
@@ -314,7 +323,7 @@ class ShortestPath:
                 path_point_x = geom[i].xy[0][k]
                 path_point_y = geom[i].xy[1][k]
                 path_point_list.append(Point(path_point_x, path_point_y))
-        return path_point_list, path_gpd
+        return path_point_list, path_gpd, path_length
 
     def get_path(self):
         g = nx.DiGraph()
@@ -347,11 +356,11 @@ class ShortestPath:
         # calculate shortest path and determine whether it is a special case
         self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=self.__end_point_id)
         trigger = 0
-        path_point_list, path_gpd = self.get_path_point(g)
+        path_point_list, path_gpd, path_length = self.get_path_point(g)
         for points in path_point_list:
             if points.distance(self.__user_point) > 5000:
                 trigger = 1
-        return self.__path, path_gpd, g, trigger
+        return self.__path, path_gpd, path_length, g, trigger
 
     def special_case(self, idx, g, ele_value_list):
         # adding the shortest_path_gpd to return
@@ -385,7 +394,7 @@ class ShortestPath:
                         index2 = x
                         end_point_id_new = nodes_name_list[index2]
                         self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id_new)
-                        path_point_list, path_gpd = self.get_path_point(g)
+                        path_point_list, path_gpd, path_length = self.get_path_point(g)
 
                         # if any segment point of current path is out of the 5km buffer range, break the loop
                         for points in path_point_list:
@@ -431,9 +440,94 @@ class ShortestPath:
         nearest_highest_point = [[ele_work_point_list[index]]]
         end_point_id = end_point_id_list[index]
         self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id)
-        path_point_list, path_gpd = self.get_path_point(g)
+        path_point_list, path_gpd, path_length = self.get_path_point(g)
 
-        return self.__path, path_gpd, nearest_highest_point, end_point_id
+        return self.__path, path_gpd, path_length, nearest_highest_point, end_point_id
+
+
+class MapPlotting:
+
+    def __init__(self):
+        self.fig = plt.figure(figsize=(4, 3), dpi=300)
+        self.ax = self.fig.add_subplot(1, 1, 1, projection=ccrs.OSGB())
+
+    def show_result(self, bg_file, elevation, ele_box, path, user_point, start_point, end_point):
+
+        # plot background
+        x0 = user_point.x
+        y0 = user_point.y
+        background = rasterio.open(str(bg_file))
+        back_array = background.read(1)
+        palette = np.array([value for key, value in background.colormap(1).items()])
+        background_image = palette[back_array]
+        bounds = background.bounds
+        extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+        display_extent = [x0 - 5000, x0 + 5000, y0 - 5000, y0 + 5000]
+        if x0 - 5000 < bounds.left:
+            display_extent[0] = bounds.left
+            display_extent[1] = bounds.left + 10000
+        if x0 + 5000 > bounds.right:
+            display_extent[1] = bounds.right
+            display_extent[0] = bounds.right - 10000
+        if y0 - 5000 < bounds.bottom:
+            display_extent[2] = bounds.bottom
+            display_extent[3] = bounds.bottom + 10000
+        if y0 + 5000 > bounds.top:
+            display_extent[3] = bounds.top
+            display_extent[2] = bounds.top - 10000
+        self.ax.imshow(background_image, origin="upper", extent=extent, zorder=1)
+        self.ax.set_extent(display_extent, crs=ccrs.OSGB())
+
+        # plot buffer
+        buffer = plt.Circle((x0, y0), 5000, color="b", alpha=0.1, zorder=3)
+        self.ax.add_patch(buffer)
+
+        # plot point
+        start, = plt.plot([start_point[0]], [start_point[1]], "o", color="#F54B0C", markersize=4, zorder=5)
+        end, = plt.plot([end_point[0]], [end_point[1]], "o", color="green", markersize=4, zorder=5)
+
+        # plot path
+        path.plot(ax=self.ax, edgecolor="#4a59ff", linewidth=1, zorder=4)
+
+        # plot elevation and colorbar
+        elevation[elevation == 0] = np.NaN
+        left, bottom, right, top = ele_box
+        ele = self.ax.imshow(elevation, interpolation='nearest', extent=[left, right, bottom, top], origin="upper",
+                             cmap='terrain', zorder=2, alpha=0.4)
+        elebar = plt.colorbar(ele, fraction=0.046, pad=0.04)
+        elebar.ax.tick_params(labelsize=5)
+
+        # plot scale bar
+        # Source: https://pypi.org/project/matplotlib-scalebar/
+        font0 = FontProperties()
+        font0.set_size(5.)
+        font0.set_weight("normal")
+        scalebar = ScaleBar(5, length_fraction=0.2, frameon=True, location="lower left")
+        scalebar.set_font_properties(font0)
+        scalebar.set_box_alpha(0.7)
+        self.ax.add_artist(scalebar)
+
+        # plot north arrow
+        # Source: https://stackoverflow.com/questions/58088841/how-to-add-a-north-arrow-on-a-geopandas-map
+        self.ax.annotate(' ', xy=(0.07, 0.9), xytext=(0.07, 0.78),
+                         arrowprops=dict(arrowstyle="wedge", facecolor="black"), ha="center", va="center", fontsize=15,
+                         xycoords=self.ax.transAxes)
+        self.ax.text(0.07, 0.93, "N", horizontalalignment='center', verticalalignment='center', fontsize=6,
+                     transform=self.ax.transAxes)
+
+        # plot legend
+        # Source: https://matplotlib.org/3.1.1/tutorials/intermediate/legend_guide.html
+        blue_patch = mpatches.Patch(color="b", alpha=0.1, label="5km Area")
+        blue_line = mlines.Line2D([], [], linewidth=1, color="#4a59ff", markersize=8, label="Shortest Path")
+        plt.legend([blue_patch, blue_line, start, end],
+                   ["5km Area", "Shortest Path", "Path Start Point", "Path End Point"],
+                   loc="upper right", fontsize=5)
+
+        # plot title
+        plt.title("Emergency Path Planning", fontsize=8)
+
+        # show
+        plt.show()
 
 
 def main():
@@ -453,6 +547,7 @@ def main():
     print("Loading elevation dataset...")
     elevation = ReadElevation("Material/elevation/SZ.asc").get_elevation_data()
     safe_area, area_ele, ele_value_list = ClipElevation("Material/elevation/SZ.asc", user_point, island).get_area_ele()
+    ele_box = elevation.bounds
 
     print("Searching for highest point within 5km...")
     nearest_highest_point_index, nearest_highest_point = FindPoint(elevation, area_ele).get_highest_point(user_point)
@@ -463,16 +558,26 @@ def main():
     start_point_id, end_point_id, idx = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
 
     print("Calculating the shortest path...")
-    path, path_gpd, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id, roads_table, nodes_table).get_path()
+    path, path_gpd, path_length, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id,
+                                              roads_table, nodes_table).get_path()
     if trigger == 1:
-        path, path_gpd, nearest_highest_point, end_point_id = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id, roads_table, nodes_table).special_case(idx, g, ele_value_list)
-
-    print("-" * 200)
+        path, path_gpd, path_length, nearest_highest_point, end_point_id = ShortestPath(elevation, area_ele, user_point,
+                                                                           start_point_id, end_point_id, roads_table,
+                                                                           nodes_table).special_case(idx, g,
+                                                                                                     ele_value_list)
+    start_point = nodes_table[start_point_id][0]
+    end_point = nodes_table[end_point_id][0]
+    print("-" * 150)
     print("The highest point available is:", nearest_highest_point[0][0])
     print("Path Start Point ID:", start_point_id, "\nPath End Point ID:", end_point_id)
-    print(path)
-    print(path_gpd)
+    print("The shortest distance is : %.2f m" % path_length)
     print("Path created.")
+
+    print("-" * 150)
+    print("Map plotting...")
+    MapPlotting().show_result("Material/background/raster-50k_2724246.tif",
+                              area_ele, ele_box, path_gpd, user_point, start_point, end_point)
+    print("Finished.")
 
 
 if __name__ == "__main__":

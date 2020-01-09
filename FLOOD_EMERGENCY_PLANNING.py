@@ -151,6 +151,7 @@ class ReadITN:
             solent_itn = json.load(f)
         roads_table = pd.DataFrame(solent_itn['roadlinks'])
         nodes_table = pd.DataFrame(solent_itn['roadnodes'])
+        print(roads_table)
         return roads_table, nodes_table
 
 
@@ -305,11 +306,13 @@ class ShortestPath:
         # get the segment points of path, put them into geopandas DataFrame
         links = []
         geom = []
+        path_length = 0
         first_node = self.__path[0]
         for node in self.__path[1:]:
             link_fid = g.edges[first_node, node]["fid"]
             links.append(link_fid)
             geom.append(LineString(self.__roads_table[link_fid][1]))
+            path_length = path_length + self.__roads_table[link_fid][0]
             first_node = node
         path_gpd = gpd.GeoDataFrame({"fid": links, "geometry": geom})
 
@@ -320,7 +323,7 @@ class ShortestPath:
                 path_point_x = geom[i].xy[0][k]
                 path_point_y = geom[i].xy[1][k]
                 path_point_list.append(Point(path_point_x, path_point_y))
-        return path_point_list, path_gpd
+        return path_point_list, path_gpd, path_length
 
     def get_path(self):
         g = nx.DiGraph()
@@ -353,11 +356,11 @@ class ShortestPath:
         # calculate shortest path and determine whether it is a special case
         self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=self.__end_point_id)
         trigger = 0
-        path_point_list, path_gpd = self.get_path_point(g)
+        path_point_list, path_gpd, path_length = self.get_path_point(g)
         for points in path_point_list:
             if points.distance(self.__user_point) > 5000:
                 trigger = 1
-        return self.__path, path_gpd, g, trigger
+        return self.__path, path_gpd, path_length, g, trigger
 
     def special_case(self, idx, g, ele_value_list):
         # adding the shortest_path_gpd to return
@@ -391,7 +394,7 @@ class ShortestPath:
                         index2 = x
                         end_point_id_new = nodes_name_list[index2]
                         self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id_new)
-                        path_point_list, path_gpd = self.get_path_point(g)
+                        path_point_list, path_gpd, path_length = self.get_path_point(g)
 
                         # if any segment point of current path is out of the 5km buffer range, break the loop
                         for points in path_point_list:
@@ -437,9 +440,9 @@ class ShortestPath:
         nearest_highest_point = [[ele_work_point_list[index]]]
         end_point_id = end_point_id_list[index]
         self.__path = nx.dijkstra_path(g, source=self.__start_point_id, target=end_point_id)
-        path_point_list, path_gpd = self.get_path_point(g)
+        path_point_list, path_gpd, path_length = self.get_path_point(g)
 
-        return self.__path, path_gpd, nearest_highest_point, end_point_id
+        return self.__path, path_gpd, path_length, nearest_highest_point, end_point_id
 
 
 class MapPlotting:
@@ -555,10 +558,10 @@ def main():
     start_point_id, end_point_id, idx = NearestITN(user_point, nearest_highest_point, nodes_table).get_nearest_itn()
 
     print("Calculating the shortest path...")
-    path, path_gpd, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id,
+    path, path_gpd, path_length, g, trigger = ShortestPath(elevation, area_ele, user_point, start_point_id, end_point_id,
                                               roads_table, nodes_table).get_path()
     if trigger == 1:
-        path, path_gpd, nearest_highest_point, end_point_id = ShortestPath(elevation, area_ele, user_point,
+        path, path_gpd, path_length, nearest_highest_point, end_point_id = ShortestPath(elevation, area_ele, user_point,
                                                                            start_point_id, end_point_id, roads_table,
                                                                            nodes_table).special_case(idx, g,
                                                                                                      ele_value_list)
@@ -567,6 +570,7 @@ def main():
     print("-" * 150)
     print("The highest point available is:", nearest_highest_point[0][0])
     print("Path Start Point ID:", start_point_id, "\nPath End Point ID:", end_point_id)
+    print("The shortest distance is : %.2f m" % path_length)
     print("Path created.")
 
     print("-" * 150)
