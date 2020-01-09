@@ -151,7 +151,6 @@ class ReadITN:
             solent_itn = json.load(f)
         roads_table = pd.DataFrame(solent_itn['roadlinks'])
         nodes_table = pd.DataFrame(solent_itn['roadnodes'])
-        print(roads_table)
         return roads_table, nodes_table
 
 
