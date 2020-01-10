@@ -55,7 +55,7 @@ class MyWindow:
         self.n = ""
 
     def calculate(self):
-        # creating "calculate" method to return E and N
+        #  creating "calculate" method to return E and N
         es = self.t1.get()
         nt = self.t2.get()
         if es != "" and nt != "":
@@ -110,6 +110,7 @@ class MyWindow:
         self.t2.delete(0, 'end')
         self.lbl4.configure(text="")
         winsound.Beep(440, 100)
+        return event
 
     def on_closing(self):
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
@@ -168,7 +169,8 @@ class PointCheck:
             status = "Error, point outside island boundaries."
             tk.Tk().withdraw()
             messagebox.showerror("ERROR",
-                                 "The inserted point is outside Isle of Wight Boundaries, please restart the program...")
+                                 "The inserted point is outside Isle of Wight Boundaries,\n"
+                                 " please restart the program...")
             exit()
         return status
 
@@ -447,10 +449,11 @@ class ShortestPath:
 class MapPlotting:
 
     def __init__(self):
-        self.fig = plt.figure(figsize=(4, 3), dpi=300)
+        self.fig = plt.figure(figsize=(3, 3.01), dpi=900)
         self.ax = self.fig.add_subplot(1, 1, 1, projection=ccrs.OSGB())
 
-    def show_result(self, bg_file, elevation, ele_box, path, user_point, start_point, end_point, highest_point):
+    def show_result(self, bg_file, elevation, ele_box, path, user_point, start_point, end_point, highest_point,
+                    h_user_point, h_nh_point):
 
         # plot background
         x0 = user_point.x
@@ -530,6 +533,13 @@ class MapPlotting:
         # plot title
         plt.title("Emergency Path Planning", fontsize=8)
 
+        # plot caption
+        h_d = h_nh_point[0] - h_user_point[0]
+        txt = "Your Current Elevation is: " + str(h_user_point[0]) + " m a.s.l. " + '\nThe Nearest Highest Point ' \
+                                                                                    'Elevation is: ' + str(
+            h_nh_point[0]) + " m a.s.l." + "\nYou must climb " + str(round(h_d, 1)) + " meters to the safe location."
+        plt.figtext(0.05, 0.09, txt, wrap=False, verticalalignment='top', horizontalalignment='left', fontsize=5)
+
         # show
         plt.show()
 
@@ -550,6 +560,10 @@ def main():
     # use island shp to clip the buffer and get the highest point of available area
     print("Loading elevation dataset...")
     elevation = ReadElevation("Material/elevation/SZ.asc").get_elevation_data()
+    # Adding elevation to user point
+    h_user_point = ""
+    for val in elevation.sample([(user_point.x, user_point.y)]):
+        h_user_point = val
     safe_area, area_ele, ele_value_list = ClipElevation("Material/elevation/SZ.asc", user_point, island).get_area_ele()
     ele_box = elevation.bounds
 
@@ -576,6 +590,10 @@ def main():
     end_point = nodes_table[end_point_id][0]
     print("-" * 150)
     print("The highest point available is:", nearest_highest_point[0][0])
+    # Adding elevation to highest point
+    h_nh_point = ""
+    for val in elevation.sample([nearest_highest_point[0][0]]):
+        h_nh_point = val
     print("Path Start Point ID:", start_point_id, "\nPath End Point ID:", end_point_id)
     print("The shortest distance is : %.2f m" % path_length)
     print("Path created.")
@@ -583,7 +601,8 @@ def main():
     print("-" * 150)
     print("Map plotting...")
     MapPlotting().show_result("Material/background/raster-50k_2724246.tif",
-                              area_ele, ele_box, path_gpd, user_point, start_point, end_point, nearest_highest_point)
+                              area_ele, ele_box, path_gpd, user_point, start_point, end_point, nearest_highest_point,
+                              h_user_point, h_nh_point)
     print("Finished.")
 
 
