@@ -65,13 +65,13 @@ class MyWindow:
                     y = float(nt)
                 except ValueError:
                     # Postcode detector sample: PO30 1QB
-                    # SOURCE: https: // api.postcodes.io /
+                    # SOURCE: https: // api.postcodes.io / github.com/jwright75/featurespace
                     self.lbl4.configure(text='Characters in the Input, Checking if Postcode match..')
                     postcode = str(es + nt).replace(" ", "")
                     resp = requests.get('https://api.postcodes.io/postcodes/' +
                                         str(postcode))
                     if resp.status_code != 404:
-                        self.lbl4.configure(text='It is a postcode')
+                        self.lbl4.configure(text='Valid postcode')
                         json_data = json.loads(resp.text)
                         qq = json_data["result"]["eastings"]
                         ww = json_data["result"]["northings"]
