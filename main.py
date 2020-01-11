@@ -75,11 +75,6 @@ class MyWindow:
                         json_data = json.loads(resp.text)
                         qq = json_data["result"]["eastings"]
                         ww = json_data["result"]["northings"]
-                        long = json_data["result"]["longitude"]
-                        lat = json_data["result"]["latitude"]
-                        self.lbl4.configure(text=str("postcode: \n  E: " + str(qq) +
-                                                     "\n  N: " + str(ww) + "\n  Lat: " + str(lat) +
-                                                     "\n  Long: " + str(long)))
                         self.e = float(qq)
                         self.n = float(ww)
                         break
