@@ -19,7 +19,7 @@ from matplotlib_scalebar.scalebar import ScaleBar
 import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 
-
+ 
 # creating UI to input coordinates
 # Source: Tkinter tutorial https://www.tutorialsteacher.com/python/create-ui-using-tkinter-in-python
 
